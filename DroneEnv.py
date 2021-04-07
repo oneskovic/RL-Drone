@@ -103,6 +103,7 @@ class DroneEnv(gym.Env):
                                          np.sqrt(self.wind_max_magnitude ** 2 - wind_force_x ** 2))
 
         wind = Force(self.__random_point_on_drone(), np.array([wind_force_x, wind_force_y]))
+
         return wind
 
     # Returns an implicit line formula in form: Ax + Bx + C
@@ -120,6 +121,10 @@ class DroneEnv(gym.Env):
              [line2[0], line2[1]]]
         B = [[-line1[2]],
              [-line2[2]]]
+        A = np.array(A, dtype=np.float32)
+        B = np.array(B, dtype=np.float32)
+        if np.linalg.matrix_rank(A) != A.shape[0]:
+            return None
         return np.linalg.solve(A, B).flat
 
     def __translate_wind_to_drone(self):
@@ -129,8 +134,8 @@ class DroneEnv(gym.Env):
             wind_line = self.__line_equation_given_two_points(self.current_wind.position_vec,
                                                               self.current_wind.position_vec + self.current_wind.force_vec)
             intersection = self.__intersection_of_lines(drone_line, wind_line)
-            if min(A[0], B[0]) <= intersection[0] <= max(A[0], B[0]):
-                # Check on which side is the wind
+            if intersection is not None and min(A[0], B[0]) <= intersection[0] <= max(A[0], B[0]):
+                # Check which side the wind is on
                 Ax = A - intersection
                 Bx = B - intersection
 
@@ -206,14 +211,18 @@ class DroneEnv(gym.Env):
         # Compute the reward
         current_position = self.drone.position_vec
         distance_from_target = np.linalg.norm(current_position - self.target_position)
+        distance_from_target_normalized = self.__minmax_normalize(0, np.sqrt(2) * 2 * self.env_max_x, distance_from_target)
 
-        reward = -self.__minmax_normalize(0, np.sqrt(2) * self.env_max_x, distance_from_target)
+        reward = 1/(distance_from_target + 1e-10)
+        #reward = -distance_from_target_normalized/1.0
+        #reward = self.__calculate_reward(distance_from_target)
         observation = self.__get_current_state()
 
         done = False
         if self.drone.position_vec[0] > self.env_max_x or self.drone.position_vec[0] < self.env_min_x or \
                 self.drone.position_vec[1] > self.env_max_y or self.drone.position_vec[1] < self.env_min_y:
             done = True
+            reward = -4200.0
 
         if self.step_count > 1000:
             done = True
@@ -251,6 +260,7 @@ class DroneEnv(gym.Env):
             self.pygame_screen = pygame.display.set_mode((500, 500))
             self.episode_progressbar = progressbar.ProgressBar(0, 1002, redirect_stdout=True)
 
+        pygame.event.pump()
         self.pygame_screen.fill(pygame.Color('Black'))
         A, B = self.drone.get_endpoints()
         A += np.array([250.0, 250.0])
